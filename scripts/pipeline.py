@@ -126,6 +126,20 @@ def extract_dialogue_blocks(text: str) -> List[Dict[str, str]]:
     flush()
     return results
 
+DEBRA_ALIASES = {
+    "DEBRA",
+    "DEB",
+    "DEBRA MORGAN",
+}
+
+def is_debra(speaker: str) -> bool:
+    s = speaker.upper().strip()
+    # exact known aliases
+    if s in DEBRA_ALIASES:
+        return True
+    # covers things like "DEBRA (something got merged into speaker)" or "DEBRA MORGAN JR" etc.
+    return s.startswith("DEBRA")
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -138,9 +152,10 @@ def main():
 
     raw = extract_text(Path(args.input))
     clean = clean_text(raw)
-    clean = clean[500:8000]
+    # clean = clean[500:8000]
     chunks = chunk_text(clean)
     dialogue = extract_dialogue_blocks(clean)
+    debra_dialogue = [d for d in dialogue if is_debra(d.get("speaker", ""))]
 
     (out / "01_raw.txt").write_text(raw, encoding="utf-8")
     (out / "02_clean.md").write_text(clean, encoding="utf-8")
@@ -152,9 +167,15 @@ def main():
     "\n".join(json.dumps(d, ensure_ascii=False) for d in dialogue),
     encoding="utf-8"
     )
+    (out / "05_debradialogue.jsonl").write_text(
+    "\n".join(json.dumps(d, ensure_ascii=False) for d in debra_dialogue),
+    encoding="utf-8"
+)
+
 
     print(f"✓ extracted {len(chunks)} chunks")
     print(f"✓ extracted {len(dialogue)} dialogue blocks")
+    print(f"✓ extracted {len(debra_dialogue)} Debra dialogue blocks")
 
 if __name__ == "__main__":
     main()
