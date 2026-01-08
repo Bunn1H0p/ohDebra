@@ -1,0 +1,6 @@
+# python venv
+.venv/
+
+# outputs / artifacts
+output/
+*.pdf
