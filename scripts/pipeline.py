@@ -6,6 +6,7 @@ import pdfplumber
 import re
 from typing import List, Dict, Optional, Tuple
 from collections import Counter
+from db import get_conn, insert_debra_swear_bucket
 
 def extract_text(pdf_path: Path) -> str:
     with pdfplumber.open(pdf_path) as pdf:
@@ -140,8 +141,6 @@ def is_debra(speaker: str) -> bool:
         return True
     # covers things like "DEBRA (something got merged into speaker)" or "DEBRA MORGAN JR" etc.
     return s.startswith("DEBRA")
-
-def count_debra_swears(debra_dialogue) -> Counter:
     """
     debra_dialogue: list of dicts like {"speaker":"DEBRA","text":"...","mode":"OS"}
     Returns counts by bucket. FUCK* counts any word token containing 'fuck' anywhere.
@@ -212,13 +211,21 @@ def main():
     chunks = chunk_text(clean)
     dialogue = extract_dialogue_blocks(clean)
     debra_dialogue = [d for d in dialogue if is_debra(d.get("speaker", ""))]
-    swear_counts = count_debra_swears(debra_dialogue)
-    total = sum(swear_counts.values())
     swear_array = swear_bucket_array(debra_dialogue)
+
+    conn = get_conn()
+
+    for bucket, (count, tokens) in swear_array.items():
+        insert_debra_swear_bucket(
+            conn,
+            source_file=args.input,
+            bucket=bucket,
+            count=count,
+            tokens=tokens,
+        )
     
-    report = [f"Total swears (bucketed): {total}"]
-    for k, v in swear_counts.most_common():
-        report.append(f"{k}: {v}")
+    conn.close()
+
     
     (out / "01_raw.txt").write_text(raw, encoding="utf-8")
     (out / "02_clean.md").write_text(clean, encoding="utf-8")
@@ -234,8 +241,7 @@ def main():
     "\n".join(json.dumps(d, ensure_ascii=False) for d in debra_dialogue),
     encoding="utf-8"
     )
-    (out / "06_debra_swear_count.txt").write_text("\n".join(report), encoding="utf-8")
-    (out / "07_debra_swear_count.json").write_text(
+    (out / "06_debra_swear_count.json").write_text(
     json.dumps(swear_array, indent=2, ensure_ascii=False),
     encoding="utf-8"
     )

@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: ohdebra-postgres
+    environment:
+      POSTGRES_USER: ohdebra
+      POSTGRES_PASSWORD: ohdebra
+      POSTGRES_DB: ohdebra_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - ohdebra_pg:/var/lib/postgresql/data
+
+volumes:
+  ohdebra_pg:
