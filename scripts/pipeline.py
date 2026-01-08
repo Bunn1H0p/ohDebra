@@ -5,6 +5,7 @@ import json
 import pdfplumber
 import re
 from typing import List, Dict, Optional, Tuple
+from collections import Counter
 
 def extract_text(pdf_path: Path) -> str:
     with pdfplumber.open(pdf_path) as pdf:
@@ -140,6 +141,61 @@ def is_debra(speaker: str) -> bool:
     # covers things like "DEBRA (something got merged into speaker)" or "DEBRA MORGAN JR" etc.
     return s.startswith("DEBRA")
 
+def count_debra_swears(debra_dialogue) -> Counter:
+    """
+    debra_dialogue: list of dicts like {"speaker":"DEBRA","text":"...","mode":"OS"}
+    Returns counts by bucket. FUCK* counts any word token containing 'fuck' anywhere.
+    """
+    text = "\n".join(d.get("text", "") for d in debra_dialogue).lower()
+    text = text.replace("’", "'").replace("`", "'").replace("Õ", "'")
+
+    tokens = re.findall(r"[a-z']+", text)
+
+    buckets = Counter()
+    buckets["FUCK*"] = sum(1 for tok in tokens if "fuck" in tok)
+
+    # keep a few other buckets (edit as you like)
+    buckets["SHIT*"] = sum(1 for tok in tokens if "shit" in tok)
+    buckets["BITCH*"] = sum(1 for tok in tokens if "bitch" in tok)
+    buckets["HELL"] = sum(1 for tok in tokens if tok == "hell")
+    buckets["DAMN"] = sum(1 for tok in tokens if tok == "damn")
+    buckets["DICK*"] = sum(1 for tok in tokens if "dick" in tok)
+
+    # drop zeros
+    return Counter({k: v for k, v in buckets.items() if v > 0})
+
+def swear_bucket_array(debra_dialogue):
+    """
+    Returns dict of bucket -> [count, sorted_unique_words_found]
+    Example:
+      {"FUCK*": [12, ["fuck", "fucken", "motherfucker"]], ...}
+    """
+    text = "\n".join(d.get("text", "") for d in debra_dialogue).lower()
+    text = text.replace("’", "'").replace("`", "'").replace("Õ", "'")
+
+    tokens = re.findall(r"[a-z']+", text)
+
+    def bucket_contains(substr: str):
+        words = [t for t in tokens if substr in t]
+        return [len(words), words]
+
+    def bucket_exact(word: str):
+        words = [t for t in tokens if t == word]
+        return [len(words), words]
+
+    result = {
+        "FUCK*": bucket_contains("fuck"),   # contains "fuck" anywhere
+        "SHIT*": bucket_contains("shit"),
+        "BITCH*": bucket_contains("bitch"),
+        "DICK*": bucket_contains("dick"),
+        "HELL": bucket_exact("hell"),
+        "DAMN": bucket_exact("damn"),
+    }
+
+    # Optional: drop empty buckets
+    result = {k: v for k, v in result.items() if v[0] > 0}
+    return result
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -156,7 +212,14 @@ def main():
     chunks = chunk_text(clean)
     dialogue = extract_dialogue_blocks(clean)
     debra_dialogue = [d for d in dialogue if is_debra(d.get("speaker", ""))]
-
+    swear_counts = count_debra_swears(debra_dialogue)
+    total = sum(swear_counts.values())
+    swear_array = swear_bucket_array(debra_dialogue)
+    
+    report = [f"Total swears (bucketed): {total}"]
+    for k, v in swear_counts.most_common():
+        report.append(f"{k}: {v}")
+    
     (out / "01_raw.txt").write_text(raw, encoding="utf-8")
     (out / "02_clean.md").write_text(clean, encoding="utf-8")
     (out / "03_chunks.jsonl").write_text(
@@ -167,15 +230,19 @@ def main():
     "\n".join(json.dumps(d, ensure_ascii=False) for d in dialogue),
     encoding="utf-8"
     )
-    (out / "05_debradialogue.jsonl").write_text(
+    (out / "05_debra_dialogue.jsonl").write_text(
     "\n".join(json.dumps(d, ensure_ascii=False) for d in debra_dialogue),
     encoding="utf-8"
-)
-
+    )
+    (out / "06_debra_swear_count.txt").write_text("\n".join(report), encoding="utf-8")
+    (out / "07_debra_swear_count.json").write_text(
+    json.dumps(swear_array, indent=2, ensure_ascii=False),
+    encoding="utf-8"
+    )
 
     print(f"✓ extracted {len(chunks)} chunks")
     print(f"✓ extracted {len(dialogue)} dialogue blocks")
-    print(f"✓ extracted {len(debra_dialogue)} Debra dialogue blocks")
+    print(f"✓ extracted {len(debra_dialogue)} debra dialogue blocks")
 
 if __name__ == "__main__":
     main()
