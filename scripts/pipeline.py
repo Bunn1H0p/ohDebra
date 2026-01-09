@@ -163,27 +163,30 @@ def is_debra(speaker: str) -> bool:
     # drop zeros
     return Counter({k: v for k, v in buckets.items() if v > 0})
 
-def swear_bucket_array(debra_dialogue):
+def debra_stats(debra_dialogue):
     """
-    Returns dict of bucket -> [count, sorted_unique_words_found]
-    Example:
-      {"FUCK*": [12, ["fuck", "fucken", "motherfucker"]], ...}
+    Returns:
+      total_words: int
+      swear_buckets: dict bucket -> [count, words_with_duplicates_in_order]
+      total_swear_words: int
+      swear_pct: float
     """
     text = "\n".join(d.get("text", "") for d in debra_dialogue).lower()
     text = text.replace("’", "'").replace("`", "'").replace("Õ", "'")
 
     tokens = re.findall(r"[a-z']+", text)
+    total_words = len(tokens)
 
     def bucket_contains(substr: str):
         words = [t for t in tokens if substr in t]
-        return [len(words), words]
+        return [len(words), words]  # duplicates preserved
 
     def bucket_exact(word: str):
         words = [t for t in tokens if t == word]
         return [len(words), words]
 
-    result = {
-        "FUCK*": bucket_contains("fuck"),   # contains "fuck" anywhere
+    swear_buckets = {
+        "FUCK*": bucket_contains("fuck"),
         "SHIT*": bucket_contains("shit"),
         "BITCH*": bucket_contains("bitch"),
         "DICK*": bucket_contains("dick"),
@@ -191,9 +194,13 @@ def swear_bucket_array(debra_dialogue):
         "DAMN": bucket_exact("damn"),
     }
 
-    # Optional: drop empty buckets
-    result = {k: v for k, v in result.items() if v[0] > 0}
-    return result
+    # drop empty buckets
+    swear_buckets = {k: v for k, v in swear_buckets.items() if v[0] > 0}
+
+    total_swear_words = sum(v[0] for v in swear_buckets.values())
+    swear_pct = (total_swear_words / total_words * 100) if total_words else 0.0
+
+    return total_words, swear_buckets, total_swear_words, swear_pct
 
 
 def main():
@@ -211,19 +218,19 @@ def main():
     chunks = chunk_text(clean)
     dialogue = extract_dialogue_blocks(clean)
     debra_dialogue = [d for d in dialogue if is_debra(d.get("speaker", ""))]
-    swear_array = swear_bucket_array(debra_dialogue)
+    total_words, swear_buckets, total_swear_words, swear_pct = debra_stats(debra_dialogue)
 
     conn = get_conn()
 
-    for bucket, (count, tokens) in swear_array.items():
+    for bucket, (count, bucket_tokens) in swear_buckets.items():
         insert_debra_swear_bucket(
-            conn,
-            source_file=args.input,
-            bucket=bucket,
-            count=count,
-            tokens=tokens,
-        )
-    
+        conn,
+        source_file=args.input,
+        bucket=bucket,
+        count=count,
+        tokens=bucket_tokens,
+    )
+
     conn.close()
 
     
@@ -241,9 +248,10 @@ def main():
     "\n".join(json.dumps(d, ensure_ascii=False) for d in debra_dialogue),
     encoding="utf-8"
     )
-    (out / "06_debra_swear_count.json").write_text(
-    json.dumps(swear_array, indent=2, ensure_ascii=False),
-    encoding="utf-8"
+    (out / "06_debra_swear_array.json").write_text(json.dumps(swear_buckets, indent=2, ensure_ascii=False), encoding="utf-8")
+    (out / "07_debra_swear_stats.txt").write_text(
+        f"Total words: {total_words}\nSwear words: {total_swear_words}\nSwear %: {swear_pct:.2f}%\n",
+        encoding="utf-8"
     )
 
     print(f"✓ extracted {len(chunks)} chunks")

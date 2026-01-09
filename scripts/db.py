@@ -1,21 +1,26 @@
-# scripts/db.py
+import json
 import os
-import psycopg
+import psycopg2
 
-def get_conn():
-    return psycopg.connect(os.environ["DATABASE_URL"])
+JSONL_PATH = "input/debra.jsonl"   # <- change
+SOURCE_FILE = "Dexter_1x01_-_Pilot.pdf"  # <- optional label
 
-def insert_debra_swear_bucket(conn, source_file, bucket, count, tokens):
-    with conn.cursor() as cur:
+conn = psycopg2.connect(os.environ["DATABASE_URL"])
+cur = conn.cursor()
+
+with open(JSONL_PATH, "r", encoding="utf-8") as f:
+    for idx, line in enumerate(f, start=1):
+        obj = json.loads(line)
+        text = obj.get("text", "")
         cur.execute(
             """
-            insert into debra_swear_bucket (source_file, bucket, count, tokens)
-            values (%s, %s, %s, %s)
-            on conflict (source_file, bucket)
-            do update set
-              count = excluded.count,
-              tokens = excluded.tokens;
+            INSERT INTO debra_lines (source_file, line_index, text, raw)
+            VALUES (%s, %s, %s, %s::jsonb)
             """,
-            (source_file, bucket, count, tokens),
+            (SOURCE_FILE, idx, text, json.dumps(obj)),
         )
-    conn.commit()
+
+conn.commit()
+cur.close()
+conn.close()
+print("Loaded:", JSONL_PATH)
